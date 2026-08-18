@@ -8,6 +8,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ---
 
+## [1.1.0] - 2026-08-18
+
+سخت‌سازی امنیتی و به‌روزرسانی هویت شرکتی.
+Security hardening and branding refresh.
+
+### افزوده شد | Added
+
+**امنیت | Security**
+- بنر هشدار در گزارش وقتی `NVD_ACCESS_KEY` خالی است، تا کاربر بداند صفحه عمومی و بدون قفل است. / A warning banner in the report when `NVD_ACCESS_KEY` is empty, so the user knows the page is public and unlocked.
+- نشانه‌ی CSRF یک‌بارمصرف و مبتنی بر session روی فرم‌های «تست دیتابیس» و «حذف فایل». / A one-time, session-based CSRF token on the "database test" and "delete file" forms.
+- محافظت در برابر SSRF از طریق هدر Host: تست‌های خودارجاع (mod_rewrite و Loopback) اکنون از `SERVER_NAME` به‌جای `HTTP_HOST` استفاده می‌کنند. / SSRF protection against Host-header spoofing: self-request tests (mod_rewrite and loopback) now use `SERVER_NAME` instead of `HTTP_HOST`.
+- نشانی‌های وب‌سایت شرکت (`navidiranian.com`, `navidiranian.co.ir`, `joomlafarsi.co.ir`, `cmssupport.ir`) به‌صورت پیوند در پاورقی گزارش و در فایل‌های مستندات. / Company website addresses (`navidiranian.com`, `navidiranian.co.ir`, `joomlafarsi.co.ir`, `cmssupport.ir`) as links in the report footer and in the documentation files.
+
+### تغییر کرد | Changed
+
+**امنیت | Security**
+- مقایسه‌ی کلید دسترسی (`NVD_ACCESS_KEY`) با `hash_equals()` انجام می‌شود تا در برابر حملات زمان‌سنجی مقاوم باشد. / The access-key (`NVD_ACCESS_KEY`) comparison now uses `hash_equals()` to resist timing attacks.
+
+**هویت شرکتی | Branding**
+- شماره‌های تماس به قالب بین‌المللی به‌روزرسانی شد: `+989395566652` و `+982191303662`. / Contact numbers updated to international format: `+989395566652` and `+982191303662`.
+
+---
+
 ## [1.0.0] - 2026-07-25
 
 نخستین نسخه‌ی پایدار — بررسی‌کننده‌ی پیش‌نیازهای وردپرس، تک‌فایلی و دوزبانه.

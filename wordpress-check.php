@@ -4,10 +4,11 @@
  *  بررسی‌کننده پیش‌نیازهای وردپرس روی هاست اشتراکی  (دوزبانه: فارسی / انگلیسی)
  *  WordPress Shared-Hosting Readiness Checker      (Bilingual: FA / EN)
  * -----------------------------------------------------------------------------
- *  Tool version : 1.0.0
+ *  Tool version : 1.1.0
  *  Developer    : شرکت نوید ایرانیان  |  Navid Iranians Co.
  *  Services     : Web Design · SEO · Web Hosting · Domain Registration · Digital Marketing
- *  Phone        : 0939 556 6652   |   021 9130 3662
+ *  Phone        : +98 939 556 6652   |   +98 21 9130 3662
+ *  Web          : navidiranian.com · navidiranian.co.ir · joomlafarsi.co.ir · cmssupport.ir
  * -----------------------------------------------------------------------------
  *  © 1405 / 2026 — All rights reserved · Navid Iranians Co.
  * -----------------------------------------------------------------------------
@@ -27,11 +28,15 @@
  |  1) Settings
  --------------------------------------------------------------------------- */
 define('NVD_ACCESS_KEY', '');          // set a value and open with ?key=... to lock the report
-define('NVD_VERSION',    '1.0.0');
+define('NVD_VERSION',    '1.1.0');
 define('NVD_COMPANY_FA', 'شرکت نوید ایرانیان');
 define('NVD_COMPANY_EN', 'Navid Iranians Co.');
-define('NVD_PHONE1',     '09395566652');
-define('NVD_PHONE2',     '02191303662');
+define('NVD_PHONE1',     '+989395566652');
+define('NVD_PHONE2',     '+982191303662');
+define('NVD_WEB1',       'navidiranian.com');
+define('NVD_WEB2',       'navidiranian.co.ir');
+define('NVD_WEB3',       'joomlafarsi.co.ir');
+define('NVD_WEB4',       'cmssupport.ir');
 
 @ini_set('display_errors', '0');
 @error_reporting(E_ALL & ~E_NOTICE & ~E_DEPRECATED & ~E_STRICT & ~E_WARNING);
@@ -39,16 +44,52 @@ define('NVD_PHONE2',     '02191303662');
 header('Content-Type: text/html; charset=utf-8');
 header('X-Robots-Tag: noindex, nofollow');
 
+// Early HTTPS detection, needed for the session-cookie "secure" flag below.
+$nvdHttpsEarly = (
+    (isset($_SERVER['HTTPS']) && strtolower($_SERVER['HTTPS']) !== 'off' && $_SERVER['HTTPS'] !== '') ||
+    (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https') ||
+    (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443)
+);
+
+// Session — holds nothing but a one-time CSRF token for the POST forms below.
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    @session_set_cookie_params(0, '/', '', $nvdHttpsEarly, true);
+    @session_start();
+}
+
+/** Random token generator with fallbacks so it still works on old PHP builds. */
+function nvd_random_token($bytes = 32) {
+    if (function_exists('random_bytes')) {
+        try { return bin2hex(random_bytes($bytes)); } catch (Exception $e) {}
+    }
+    if (function_exists('openssl_random_pseudo_bytes')) {
+        $r = @openssl_random_pseudo_bytes($bytes);
+        if ($r !== false) return bin2hex($r);
+    }
+    $s = '';
+    for ($i = 0; $i < $bytes; $i++) $s .= chr(mt_rand(0, 255));
+    return bin2hex($s);
+}
+function nvd_csrf_token() {
+    if (empty($_SESSION['nvd_csrf'])) $_SESSION['nvd_csrf'] = nvd_random_token(32);
+    return $_SESSION['nvd_csrf'];
+}
+function nvd_csrf_check() {
+    $tok = isset($_POST['nvd_csrf']) ? (string)$_POST['nvd_csrf'] : '';
+    return ($tok !== '' && !empty($_SESSION['nvd_csrf']) && hash_equals($_SESSION['nvd_csrf'], $tok));
+}
+
 // Language
 $LANG = 'fa';
 if (isset($_GET['lang']) && $_GET['lang'] === 'en') $LANG = 'en';
 $IS_FA = ($LANG === 'fa');
 $DIR   = $IS_FA ? 'rtl' : 'ltr';
 
-// Access lock
-if (NVD_ACCESS_KEY !== '') {
-    $k = isset($_GET['key']) ? $_GET['key'] : '';
-    if ($k !== NVD_ACCESS_KEY) {
+// Access lock — constant-time comparison so the key check leaks no timing signal.
+$nvdLocked = (NVD_ACCESS_KEY !== '');
+if ($nvdLocked) {
+    $k = isset($_GET['key']) ? (string)$_GET['key'] : '';
+    if (!hash_equals(NVD_ACCESS_KEY, $k)) {
         header('HTTP/1.1 403 Forbidden');
         echo '<meta charset="utf-8"><div style="font:16px Tahoma;padding:40px">Access denied.</div>';
         exit;
@@ -148,14 +189,28 @@ $isLiteSpeed = (stripos($serverSoft, 'litespeed') !== false || stripos($sapi, 'l
 $isApache    = (stripos($serverSoft, 'apache') !== false);
 $isNginx     = (stripos($serverSoft, 'nginx') !== false);
 $isIIS       = (stripos($serverSoft, 'iis') !== false);
-$isHttps     = (
-    (isset($_SERVER['HTTPS']) && strtolower($_SERVER['HTTPS']) !== 'off' && $_SERVER['HTTPS'] !== '') ||
-    (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https') ||
-    (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443)
-);
+$isHttps     = $nvdHttpsEarly;
 $hostName    = isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'localhost';
 $deep        = (isset($_GET['deep']) && $_GET['deep'] === '1');
 $here        = __DIR__;
+
+/**
+ * Host to use for the server's own outbound self-requests (mod_rewrite probe,
+ * loopback test). Prefers SERVER_NAME — fixed by the vhost config — over the
+ * client-supplied HTTP_HOST header, so a spoofed Host header cannot redirect
+ * these outbound requests to an attacker-chosen target (SSRF).
+ */
+function nvd_safe_self_host($fallback) {
+    $candidates = array();
+    if (isset($_SERVER['SERVER_NAME']) && $_SERVER['SERVER_NAME'] !== '') $candidates[] = $_SERVER['SERVER_NAME'];
+    if ($fallback !== '') $candidates[] = $fallback;
+    foreach ($candidates as $c) {
+        $hostOnly = preg_replace('/:\d+$/', '', $c);
+        if (preg_match('/^[A-Za-z0-9]([A-Za-z0-9\-\.]{0,251}[A-Za-z0-9])?$/', $hostOnly)) return $c;
+    }
+    return 'localhost';
+}
+$selfHost = nvd_safe_self_host($hostName);
 
 $sections = array();
 
@@ -700,7 +755,7 @@ if ($deep) {
     if (@mkdir($probeDir, 0755)) {
         @file_put_contents($probeDir.'/ok.txt', 'NVD_REWRITE_OK');
         @file_put_contents($probeDir.'/.htaccess', "Options +FollowSymLinks\n<IfModule mod_rewrite.c>\nRewriteEngine On\nRewriteRule ^probe\\.txt$ ok.txt [L]\n</IfModule>\n");
-        $base = ($isHttps?'https://':'http://').$hostName;
+        $base = ($isHttps?'https://':'http://').$selfHost;
         $path = isset($_SERVER['SCRIPT_NAME']) ? rtrim(str_replace('\\','/',dirname($_SERVER['SCRIPT_NAME'])),'/') : '';
         $probeUrl = $base.$path.'/'.basename($probeDir).'/probe.txt';
         $body='';
@@ -734,7 +789,7 @@ if ($deep) {
         ($rwStatus==='pass')?'':T('فعال‌سازی mod_rewrite و AllowOverride All','Enable mod_rewrite and AllowOverride All'));
 
     // loopback (WP-Cron / Site Health depends on this)
-    $selfBase = ($isHttps?'https://':'http://').$hostName.(isset($_SERVER['REQUEST_URI'])?strtok($_SERVER['REQUEST_URI'],'?'):'/');
+    $selfBase = ($isHttps?'https://':'http://').$selfHost.(isset($_SERVER['REQUEST_URI'])?strtok($_SERVER['REQUEST_URI'],'?'):'/');
     $lp = nvd_http_head($selfBase, 6);
     $lpOk = ($lp['code'] >= 200 && $lp['code'] < 500);
     $G[] = nvd_item(T('درخواست حلقه‌ای (Loopback)','Loopback request'), $lpOk?'pass':'warn',
@@ -766,7 +821,11 @@ if ($deep) {
  |  H — Database connection test (optional form)
  =========================================================================== */
 $dbResult = null;
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nvd_db_test'])) {
+$dbCsrfError = false;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nvd_db_test']) && !nvd_csrf_check()) {
+    $dbCsrfError = true;
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nvd_db_test']) && !$dbCsrfError) {
     $dbHost=trim(nvd_get($_POST,'db_host','localhost'));
     $dbUser=trim(nvd_get($_POST,'db_user',''));
     $dbPass=(string)nvd_get($_POST,'db_pass','');
@@ -891,7 +950,11 @@ $iniFixes = array_values(array_unique($iniFixes));
 /* ---------------------------------------------------------------------------
  |  6) Safe self-delete
  --------------------------------------------------------------------------- */
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nvd_selfdestruct'])) {
+$deleteCsrfError = false;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nvd_selfdestruct']) && !nvd_csrf_check()) {
+    $deleteCsrfError = true;
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nvd_selfdestruct']) && !$deleteCsrfError) {
     if (@unlink(__FILE__)) {
         echo '<!DOCTYPE html><html lang="'.$LANG.'" dir="'.$DIR.'"><head><meta charset="utf-8">'
            . '<title>'.T('حذف شد','Deleted').'</title><style>body{font-family:Vazirmatn,Tahoma,sans-serif;'
@@ -1028,6 +1091,9 @@ input.inp:focus{outline:2px solid rgba(22,189,179,.35);border-color:var(--fz)}
 .foot ul{list-style:none;margin:0;padding:0}
 .foot li{font-size:13.5px;padding:5px 0;color:#9FB8CC;display:flex;gap:8px}
 .foot li:before{content:"◆";color:var(--fz);font-size:9px;line-height:2.4}
+.weblinks{margin:0 0 10px;font-size:13px;direction:ltr;text-align:left}
+.weblinks a{color:var(--fz);text-decoration:none;font-weight:600;margin-inline-end:10px;white-space:nowrap}
+.weblinks a:hover{text-decoration:underline}
 .tel{display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);
   border-radius:11px;padding:10px 14px;margin-bottom:9px;color:#fff;text-decoration:none;transition:.16s}
 .tel:hover{background:var(--fz);border-color:var(--fz);color:#04252B}
@@ -1089,6 +1155,14 @@ input.inp:focus{outline:2px solid rgba(22,189,179,.35);border-color:var(--fz)}
     </div>
   </section>
 
+  <?php if (!$nvdLocked): ?>
+  <div class="note" style="border-inline-start-color:var(--fail);background:#FDEEF1;color:#7A1230">
+    <b><?php echo T('این گزارش بدون قفل و عمومی است!','This report is public and unlocked!'); ?></b><br>
+    <?php echo T('هر کسی که آدرس این فایل را بداند می‌تواند اطلاعات سرور شما (مسیرها، تنظیمات PHP، وضعیت وردپرس) را ببیند. مقدار NVD_ACCESS_KEY را در ابتدای فایل تنظیم کنید و صفحه را با ‎?key=...‎ باز کنید، یا بلافاصله پس از پایان کار همین فایل را حذف کنید.',
+        'Anyone who knows this file’s URL can see your server details (paths, PHP settings, WordPress status). Set NVD_ACCESS_KEY at the top of the file and open the page with ?key=..., or delete this file as soon as you are done.'); ?>
+  </div>
+  <?php endif; ?>
+
   <div class="actions">
     <?php if (!$deep): ?>
       <a class="btn btn-p" href="<?php echo nvd_e($deepUrl); ?>#net"><?php echo T('اجرای تست‌های عمیق (شبکه و mod_rewrite)','Run deep tests (network & mod_rewrite)'); ?></a>
@@ -1100,9 +1174,11 @@ input.inp:focus{outline:2px solid rgba(22,189,179,.35);border-color:var(--fz)}
     <a class="btn" href="#dbtest"><?php echo T('تست اتصال دیتابیس','Database connection test'); ?></a>
     <form method="post" style="display:inline" onsubmit="return confirm('<?php echo T('این فایل برای همیشه حذف می‌شود. مطمئن هستید؟','This file will be permanently deleted. Are you sure?'); ?>')">
       <input type="hidden" name="nvd_selfdestruct" value="1">
+      <input type="hidden" name="nvd_csrf" value="<?php echo nvd_e(nvd_csrf_token()); ?>">
       <button class="btn btn-d" type="submit"><?php echo T('حذف این فایل از سرور','Delete this file'); ?></button>
     </form>
   </div>
+  <?php if ($deleteCsrfError): ?><div class="note"><?php echo T('درخواست نامعتبر بود (نشانه CSRF نامعتبر یا منقضی‌شده)؛ صفحه را تازه‌سازی کرده و دوباره تلاش کنید.','Invalid request (missing or expired CSRF token); refresh the page and try again.'); ?></div><?php endif; ?>
   <?php if (isset($deleteError)): ?><div class="note"><?php echo nvd_e($deleteError); ?></div><?php endif; ?>
 
 <?php foreach ($sections as $sec): ?>
@@ -1127,8 +1203,10 @@ input.inp:focus{outline:2px solid rgba(22,189,179,.35);border-color:var(--fz)}
     <h3><?php echo T('تست اتصال دیتابیس','Database connection test'); ?></h3>
     <p class="hint"><?php echo T('همان اطلاعاتی را وارد کنید که می‌خواهید در wp-config.php استفاده کنید. نسخه، utf8mb4، InnoDB و سطح دسترسی بررسی می‌شود. هیچ اطلاعاتی ذخیره یا ارسال نمی‌شود.',
         'Enter the credentials you plan to use in wp-config.php. Version, utf8mb4, InnoDB and privileges are checked. Nothing is stored or sent.'); ?></p>
+    <?php if ($dbCsrfError): ?><div class="note"><?php echo T('درخواست نامعتبر بود (نشانه CSRF نامعتبر یا منقضی‌شده)؛ صفحه را تازه‌سازی کرده و دوباره تلاش کنید.','Invalid request (missing or expired CSRF token); refresh the page and try again.'); ?></div><?php endif; ?>
     <form method="post">
       <input type="hidden" name="nvd_db_test" value="1">
+      <input type="hidden" name="nvd_csrf" value="<?php echo nvd_e(nvd_csrf_token()); ?>">
       <input type="hidden" name="lang" value="<?php echo $LANG; ?>">
       <div class="grid2">
         <div><label class="fld"><?php echo T('میزبان دیتابیس','DB host'); ?></label>
@@ -1218,6 +1296,12 @@ input.inp:focus{outline:2px solid rgba(22,189,179,.35);border-color:var(--fz)}
             'We don\'t just build sites that launch — we build sites that work. From domain and hosting to design, SEO and monthly care, your entire online presence is handled under one roof. This tool is part of that: make sure the ground is ready before you install.'); ?></p>
         <p style="color:#7F97AC;font-size:12.5px"><?php echo T('تخصص ما در وردپرس، جوملا و توسعه‌ی اختصاصی؛ با پشتیبانی فارسی و عربی برای بازار ایران و عراق.',
             'Expertise in WordPress, Joomla and custom development; with Persian and Arabic support for Iran and Iraq.'); ?></p>
+        <p class="weblinks">
+          <a href="https://<?php echo nvd_e(NVD_WEB1); ?>" target="_blank" rel="noopener"><?php echo nvd_e(NVD_WEB1); ?></a>
+          <a href="https://<?php echo nvd_e(NVD_WEB2); ?>" target="_blank" rel="noopener"><?php echo nvd_e(NVD_WEB2); ?></a>
+          <a href="https://<?php echo nvd_e(NVD_WEB3); ?>" target="_blank" rel="noopener"><?php echo nvd_e(NVD_WEB3); ?></a>
+          <a href="https://<?php echo nvd_e(NVD_WEB4); ?>" target="_blank" rel="noopener"><?php echo nvd_e(NVD_WEB4); ?></a>
+        </p>
       </div>
       <div>
         <h4><?php echo T('خدمات ما','Our services'); ?></h4>

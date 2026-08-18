@@ -6,10 +6,11 @@
 | | |
 |---|---|
 | **فایل / File** | `wordpress-check.php` |
-| **نسخه / Version** | `1.0.0` |
+| **نسخه / Version** | `1.1.0` |
 | **سازگاری / Compatibility** | PHP 5.6 – 8.5 |
 | **وابستگی / Dependencies** | ندارد (بدون CDN، بدون Composer) — None (no CDN, no Composer) |
 | **توسعه / Developer** | شرکت نوید ایرانیان · Navid iranian Co. |
+| **وب‌سایت / Website** | [navidiranian.com](https://navidiranian.com) · [navidiranian.co.ir](https://navidiranian.co.ir) · [joomlafarsi.co.ir](https://joomlafarsi.co.ir) · [cmssupport.ir](https://cmssupport.ir) |
 
 ---
 
@@ -27,6 +28,7 @@
 6. **متن آماده‌ی تیکت پشتیبانی** که از روی نتایج ساخته می‌شود و با یک کلیک کپی می‌شود.
 7. **قطعه‌ی php.ini** فقط شامل خطوطی که واقعاً باید عوض شوند.
 8. **حذف امن خودکار** با دکمه‌ی تأییددار، به‌علاوه قفل اختیاری با کلید دسترسی.
+9. **سخت‌سازی امنیتی**: نشانه‌ی CSRF یک‌بارمصرف روی فرم‌های حساس، محافظت در برابر SSRF در تست‌های خودارجاع (استفاده از `SERVER_NAME` به‌جای هدر Host)، مقایسه‌ی زمان‌ثابت کلید دسترسی با `hash_equals()`، و بنر هشدار وقتی گزارش قفل نیست.
 
 ### نصب و استفاده
 1. فایل `wordpress-check.php` را در پوشه‌ی اصلی هاست (`public_html`) آپلود کنید.
@@ -61,10 +63,15 @@
 - هدر `noindex, nofollow` روی صفحه ست می‌شود تا در موتورهای جست‌وجو ایندکس نشود.
 - اطلاعات تست دیتابیس فقط برای همان درخواست استفاده می‌شود و **ذخیره یا ارسال نمی‌شود**.
 - این فایل مسیرها و تنظیمات سرور را نشان می‌دهد؛ برای همین **بعد از استفاده باید حذف شود**. از قفل `NVD_ACCESS_KEY` هم می‌توانید استفاده کنید.
+- وقتی `NVD_ACCESS_KEY` خالی بماند، یک بنر هشدار قرمز در بالای گزارش نمایش داده می‌شود تا یادآوری کند صفحه عمومی و بدون قفل است.
+- مقایسه‌ی کلید دسترسی با `hash_equals()` انجام می‌شود تا در برابر حملات زمان‌سنجی (timing attack) مقاوم باشد.
+- فرم‌های «تست دیتابیس» و «حذف فایل» با یک نشانه‌ی CSRF یک‌بارمصرف (مبتنی بر session) محافظت می‌شوند تا یک صفحه‌ی مخرب نتواند بدون اطلاع شما این عملیات را اجرا کند.
+- درخواست‌های خودارجاع (تست mod_rewrite و Loopback) از `SERVER_NAME` به‌جای هدر `Host` استفاده می‌کنند تا با هدر Host جعلی قابل هدایت به مقصدی دیگر نباشند (محافظت در برابر SSRF).
 
 ### پشتیبانی
 شرکت نوید ایرانیان — طراحی وب‌سایت، سئو، میزبانی وب، ثبت دامنه و دیجیتال مارکتینگ
-📱 **۰۹۳۹۵۵۶۶۶۵۲** (همراه · واتساپ) — ☎️ **۰۲۱۹۱۳۰۳۶۶۲** (دفتر مرکزی)
+📱 [+98 939 556 6652](tel:+989395566652) (همراه · واتساپ) — ☎️ [+98 21 9130 3662](tel:+982191303662) (دفتر مرکزی)
+🌐 [navidiranian.com](https://navidiranian.com) · [navidiranian.co.ir](https://navidiranian.co.ir) · [joomlafarsi.co.ir](https://joomlafarsi.co.ir) · [cmssupport.ir](https://cmssupport.ir)
 
 ---
 
@@ -82,6 +89,7 @@ This script checks your server against the **official WordPress requirements** (
 6. **Ready-made support ticket** — generated from the results, copied with one click.
 7. **php.ini snippet** — only the lines that actually need changing.
 8. **Safe self-delete** — a confirmed button, plus an optional access-key lock.
+9. **Security hardening**: a one-time CSRF token on the sensitive forms, SSRF protection on the self-requests (uses `SERVER_NAME` instead of the Host header), a constant-time access-key comparison via `hash_equals()`, and a warning banner when the report is left unlocked.
 
 ### Installation & usage
 1. Upload `wordpress-check.php` to your site root (`public_html`).
@@ -116,6 +124,10 @@ A few constants at the top of the file:
 - The page sends a `noindex, nofollow` header so it is not indexed by search engines.
 - Database-test credentials are used only for that single request and are **never stored or sent anywhere**.
 - This file exposes server paths and settings, so **delete it after use**. You can also lock it with `NVD_ACCESS_KEY`.
+- When `NVD_ACCESS_KEY` is left empty, a red warning banner appears at the top of the report reminding you the page is public and unlocked.
+- The access-key check uses `hash_equals()` to resist timing attacks.
+- The "database test" and "delete file" forms are protected by a one-time, session-based CSRF token, so a malicious page cannot trigger these actions without your knowledge.
+- Self-requests (the mod_rewrite and loopback tests) use `SERVER_NAME` instead of the `Host` header, so a spoofed Host header cannot redirect them elsewhere (SSRF protection).
 
 ### WordPress requirements reference
 | Component | Minimum | Recommended |
@@ -129,7 +141,8 @@ A few constants at the top of the file:
 
 ### Support
 Navid iranian Co. — Web Design, SEO, Web Hosting, Domain Registration & Digital Marketing
-📱 **09395566652** (Mobile · WhatsApp) — ☎️ **02191303662** (Head office)
+📱 [+98 939 556 6652](tel:+989395566652) (Mobile · WhatsApp) — ☎️ [+98 21 9130 3662](tel:+982191303662) (Head office)
+🌐 [navidiranian.com](https://navidiranian.com) · [navidiranian.co.ir](https://navidiranian.co.ir) · [joomlafarsi.co.ir](https://joomlafarsi.co.ir) · [cmssupport.ir](https://cmssupport.ir)
 
 ---
 
